@@ -1,0 +1,322 @@
+---
+title: "Ramirez Final"
+author: "Esteban Ramirez"
+format: html
+editor: visual
+---
+
+This is a QMD file for my Stat-213 Final. Here, I will explore the "final.csv" data set that was provided in an effort to demonstrate my learning from this class.
+
+# Setup
+
+```{r}
+rm(list=ls())
+library(here)
+library(tidyverse)
+library(ggfortify)
+library(yardstick)
+library(pROC)
+data<-read.csv(here("data","final.csv"))
+glimpse(data)
+set.seed(111)
+```
+
+```{r}
+summary(data)
+```
+
+# Getting Models
+
+## Splitting Train and Test subsets
+
+I am going with and 80/20 split because I feel it gives enough data to train on while leaving a large enough chunk to test on. This allows us enough data to get meaningful results from in both cases.
+
+```{r}
+# Total number of rows
+n_total <- nrow(data)
+
+# Randomly sample 80% of the indices
+train_index <- sample(1:n_total, size = round(0.8 * n_total, 0))
+
+# Create training and test sets
+train_data <- data[train_index, ]
+test_data <- data[-train_index, ]
+
+# Checking size
+dim(train_data)
+dim(test_data)
+```
+
+## Model for y1
+
+let's start by just visualizing y1
+
+```{r}
+ggplot(data,aes(y1))+
+  geom_histogram()
+```
+
+It looks normal, just with some outliers, so a linear model should work.
+
+Now let's start the variable selection:
+
+```{r}
+# Full model and null model
+full_model <- lm(y1 ~ ., data = train_data)
+null_model <- lm(y1 ~ 1, data = train_data)
+
+# Stepwise selection by AIC
+aicf <- step(null_model, scope = list(lower = null_model, upper = full_model), direction = "forward")
+summary(aicf)
+```
+
+Also using BIC to cross reference
+
+```{r}
+# Stepwise selection by BIC
+bicf <- step(null_model, scope = list(lower = null_model, upper = full_model), 
+                  direction = "forward", k = log(nrow(train_data)))
+summary(bicf)
+```
+
+I'll go with the BIC model due to it being more strict on complexity.
+
+Here is the fitted model when x1=1:
+
+$$
+\hat{y1}=5.3772+3.5772*\text{x5}+0.61554*\text{x6}-1.0604*\text{x10}+1.0643*\text{x13}+0.4938*\text{x14}+0.4938*\text{x49}
+$$
+
+Here is the fitted model when x1=0:
+
+$$ \hat{y1}=3.0926+3.5772*\text{x5}+0.61554*\text{x6}-1.0604*\text{x10}+1.0643*\text{x13}+0.4938*\text{x14}+0.4938*\text{x49} $$
+
+Evaluate the model using the test data and model assumptions
+
+```{r}
+plot(bicf)
+```
+
+-   Residuals vs. Fitted: Decent spread around zero. Linearity holds
+
+-   Q-Q Plot: Data holds decently close to normal, but outliers are too far. Normalcy does not hold
+
+-   Scale-Location: Decent spread with few outliers. Constant Variance holds
+
+-   Residuals vs. Leverage: We see highly influential points at 26 and 138.
+
+```{r}
+pred_bic <- predict(bicf, newdata = test_data)
+actual <- test_data$y1
+rmse_bic <- sqrt(mean((pred_bic - actual)^2))
+r2_bic <- 1 - sum((pred_bic - actual)^2) / sum((actual - mean(actual))^2)
+#write.csv(pred_bic,file = here("data","RamirezY1Test.csv"))
+```
+
+```{r}
+cat("Stepwise BIC Model - Test RMSE:", rmse_bic, "\n") 
+cat("Stepwise BIC Model - Test R2:", r2_bic, "\n")
+```
+
+On average, this model predicts about 4.2 units off from the true value and explains about 48% of the variability in the test set.
+
+```{r}
+plot_data <- data.frame(
+  Actual = actual,
+  Predicted = pred_bic
+)
+
+# Plot
+ggplot(plot_data, aes(x = Actual, y = Predicted)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(
+    title = "Actual vs Predicted y1 (Test Set)",
+    subtitle = paste0("Test R² = ", round(r2_bic, 3)),
+    x = "Actual y1",
+    y = "Predicted y1"
+  ) +
+  theme_minimal()
+```
+
+We can see a decent correlation here.
+
+## Model for y2
+
+```{r}
+# Full model and null model
+full_model2 <- glm(y2 ~ ., data = train_data,family = 'binomial')
+null_model2 <- glm(y2 ~ 1, data = train_data,family = 'binomial')
+
+# Stepwise selection by AIC
+aicf2 <- step(null_model2, scope = list(lower = null_model2, upper = full_model2), direction = "forward")
+summary(aicf2)
+```
+
+crossreference:
+
+```{r}
+# Stepwise selection by BIC
+bicf2 <- step(null_model2, scope = list(lower = null_model2, upper = full_model2), 
+                  direction = "forward", k = log(nrow(train_data)))
+summary(bicf2)
+```
+
+Again, we'll use the BIC model due to strictness.
+
+Here is the fitted model when x1=1:
+
+$$ \hat{\pi} = \dfrac{\exp(0.16057+0.29677*\text{x21}+0.44050*\text{x25}+0.29052*\text{x20})}{1 + \exp(-1.28600+0.42682*\text{x21}+1.15651*\text{x1}+0.41006*\text{x25}+0.21078*\text{x20}+0.11432*\text{x15})} $$
+
+Here is the fitted model when x1=0:
+
+$$ \hat{\pi} = \dfrac{\exp(-0.75876+0.29677*\text{x21}+0.44050*\text{x25}+0.29052*\text{x20})}{1 + \exp(-1.28600+0.42682*\text{x21}+1.15651*\text{x1}+0.41006*\text{x25}+0.21078*\text{x20}+0.11432*\text{x15})} $$
+
+Evaluate the model using the test data and model assumptions
+
+```{r}
+pred_probs_log <- predict(bicf2, newdata = test_data, type = "response")
+pred_class_log <- ifelse(pred_probs_log > 0.5, 1, 0)
+results <- tibble(
+  truth = factor(test_data$y2, levels = c(0, 1)),
+  predicted = factor(pred_class_log, levels = c(0, 1))
+)
+conf_mat(results, truth = truth, estimate = predicted)
+
+accuracy(results, truth = truth, estimate = predicted)
+sens(results, truth = truth, estimate = predicted)
+spec(results, truth = truth, estimate = predicted)
+
+```
+
+We see that 63 0s that were predicted as 0s and 74 1s that were predicted as 1s. This shows about 0.685 accuracy, with 0.677 sensitivity, and 0.692 specificity.
+
+```{r}
+roc_obj_log <- roc(test_data$y2, pred_probs_log)
+auc_value_log <- auc(roc_obj_log)
+cat("Logistic Regression Model (Stepwise) - Test AUC:", auc_value_log, "\n")
+```
+
+AUC is 0.74, meaning we have a decent classifier.
+
+# Inferences
+
+### ANOVA
+
+We'll do an ANOVA test to determine the overall effectiveness of the first linear model:
+
+```{r}
+anovamod<-lm(y1 ~ x5 + x6 + x1 + x10 + x13 + x14 + x49, data = train_data)
+```
+
+we can't just use the anova function because that does not give us the overall effectiveness of the model
+
+```{r}
+anova_table <- anova(anovamod)
+anova_table
+
+SS_error <- anova_table["Residuals", "Sum Sq"] 
+SS_model <- sum(anova_table$"Sum Sq") - anova_table["Residuals", "Sum Sq"]
+SS_total <- sum(anova_table$"Sum Sq")
+
+df_model <- 7 
+df_error <-  800-7-1
+df_total <- 800-1 
+
+MS_model <- SS_model / df_model 
+MS_error <- SS_error / df_error 
+F_value <- MS_model / MS_error 
+pf(F_value , df_model, df_error, lower.tail = FALSE)
+F_value
+```
+
+$$
+H_0:\beta_5=\beta_6=\beta_1=\beta_{10}=\beta_{13}=\beta_{49}=0\text{ vs }H_a: \text{at least one of the beta values is different}
+$$
+
+F=125.4273 df= 800,7 p\<\<0.05
+
+There is enough evidence to reject the null hypothesis and conclude that this model is useful in predicting y1.
+
+### T Test for Correlation
+
+Here I will test if y1 and x19 are related
+
+```{r}
+cor.test(data$y1,data$x19)
+```
+
+$$
+H_0:\beta_1=0\text{ vs. }H_a:\beta_1\neq0
+$$
+
+t=-0.22055 df=998 p\>0.05
+
+There is not enough evidence to reject the null hypothesis, so we must conclude that x19 is not useful in predicting y1.
+
+### Nested LRT
+
+I'll do a Nested LRT using the AIC model with y1 as response as the full model and the BIC version as the reduced.
+
+```{r}
+anova(bicf,aicf,test='Chisq')
+```
+
+There is enough evidence (p\<0.05) to say the AIC model is more useful, so it would have been fine to go with either model. We chose the BIC model because it has more strict criteria as well as being simpler
+
+### Wald z Test
+
+A wald z test is used to measure the usefulness of an individual coefficient in a model.
+
+```{r}
+summary(bicf2)
+```
+
+The z test is actually already done here, but I'll repeat what was automated by R for the x5 predictor here.
+
+```{r}
+summary(bicf2)$coefficients["x21",]
+```
+
+We now take the estimate and divide by the SE:
+
+```{r}
+3.577211/0.1468031
+
+```
+
+$$
+H_0:\beta=0 \text{ vs. } H_a:\beta\neq0
+$$
+
+z=24.36741, p\<\<0.05
+
+There is enough evidence to reject the null hypothesis and conclude that x5 is useful in predicting y1.
+
+### Confidence Interval for Odds Ratio:
+
+```{r}
+summary(bicf2)
+```
+
+Here, I'll go with x21
+
+```{r}
+exp(0.29677 + c(-1,1)*1.96*0.05401)
+```
+
+We are 95% confident that the odds ratio for y2 in relation to x21, while holding all other predictors constant is between 1.210351 and 1.495753.
+
+### Confidence Interval for a Coefficient
+
+I'll go with x5 in the y1 model.
+
+```{r}
+summary(bicf)$coefficients["x5",]
+```
+
+```{r}
+3.577211 + c(-1,1)*1.96*0.1468031 
+```
+
+We are 95% confident that the slope of x5, when holding all other predictors constant is between 3.29 and 3.86.
